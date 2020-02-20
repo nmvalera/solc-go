@@ -2,7 +2,6 @@ package solc
 
 import (
 	"fmt"
-	"io/ioutil"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -124,12 +123,10 @@ func TestSolc(t *testing.T) {
 
 func testSolc(t *testing.T, test testCase) {
 	// Read Solsjon file
-	soljson, err := ioutil.ReadFile(fmt.Sprintf("./solc-bin/soljson-v%v.js", test.commit))
-	require.NoError(t, err, "Soljson script should be loaded properly")
-
-	// Create Solc object
-	solc, err := New(string(soljson))
+	solc, err := NewFromFile(fmt.Sprintf("./solc-bin/soljson-v%v.js", test.commit))
 	require.NoError(t, err, "Creating Solc from valid solc emscripten binary should not error")
+
+	// Test License and Version methods
 	assert.Greater(t, len(solc.License()), 10, "License should be valid")
 	assert.Equal(t, fmt.Sprintf("%v.Emscripten.clang", test.commit), solc.Version(), "Version should be correct")
 
