@@ -1,4 +1,4 @@
-module gitlab.com/ConsenSys/client/fr/core-stack/golang-solidity.git
+module github.com/nmvalera/solc-go
 
 go 1.13
 
