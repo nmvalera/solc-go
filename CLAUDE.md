@@ -108,6 +108,53 @@ The library executes Emscripten-compiled Solidity binaries in V8:
 - JSON marshaling for input/output between Go and JavaScript
 - Proper resource disposal using `isolate.Dispose()` instead of deprecated `Close()`
 
+### Import Resolution System
+
+The library implements a sophisticated import resolution system that mimics the behavior of solc.js:
+
+**Core Interface**:
+- `CompileWithOptions(input *Input, options *CompileOptions)` - Primary compilation method
+- `CompileOptions.ImportCallback func(url string) ImportResult` - Go callback for import resolution
+- Pass `nil` options for simple compilation without imports
+
+**Import Resolution Process**:
+1. **Iterative Resolution**: Uses a JavaScript wrapper that performs up to 10 compilation iterations
+2. **Error Detection**: Parses compiler errors to identify missing imports with pattern matching:
+   - Looks for `ParserError` with "not found" and "File not supplied initially" messages
+   - Extracts import paths using regex: `import\s+.*?from\s+["']([^"']+)["']`
+3. **Dynamic Loading**: Calls Go import callback to resolve missing files
+4. **Source Injection**: Adds resolved content to the input sources and retries compilation
+5. **Fallback Handling**: Returns compilation errors if import resolution fails
+
+**JavaScript Integration**:
+- Creates `solc.compile()` interface compatible with solc.js standards
+- Implements `compileWithImports()` global function for internal use
+- Supports both callback-based and direct compilation modes
+- Provides debug logging when `SOLC_DEBUG=1` environment variable is set
+
+**Error Handling**:
+- Import callbacks return `ImportResult{Contents: string, Error: string}`
+- Failed imports stop the resolution process and return compiler errors
+- Graceful degradation when imports cannot be resolved
+
+**Thread Safety**:
+- All compilation operations are protected by mutex
+- V8 context access is serialized to prevent race conditions
+- Import callbacks are called synchronously within the compilation context
+
+**Example Usage**:
+```go
+options := &CompileOptions{
+    ImportCallback: func(url string) ImportResult {
+        if content, err := os.ReadFile(url); err == nil {
+            return ImportResult{Contents: string(content)}
+        }
+        return ImportResult{Error: fmt.Sprintf("File not found: %s", url)}
+    },
+}
+output, err := compiler.CompileWithOptions(input, options)
+```
+
 ### Automation Scripts
 
 Located in `scripts/` directory, these handle embedded binary maintenance:

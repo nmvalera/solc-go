@@ -2,6 +2,8 @@ package solc
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -573,7 +575,7 @@ func TestDownloadSolcBinary(t *testing.T) {
 	assert.Contains(t, err.Error(), "HTTP", "Error should mention HTTP error")
 }
 
-func TestOpenZeppelin(t *testing.T) {
+func TestImport(t *testing.T) {
 	code := `
 	// SPDX-License-Identifier: MIT
 	// Compatible with OpenZeppelin Contracts ^5.4.0
@@ -648,7 +650,7 @@ func TestOpenZeppelin(t *testing.T) {
 	assert.NotEmpty(t, output.Contracts, "Should have compiled contracts")
 }
 
-func TestNestedOpenZeppelin(t *testing.T) {
+func TestNestedImports(t *testing.T) {
 	code := `
 	// SPDX-License-Identifier: MIT
 	// Compatible with OpenZeppelin Contracts ^5.4.0
@@ -866,4 +868,120 @@ func TestNestedOpenZeppelin(t *testing.T) {
 		t.Logf("Input sources: %+v", input.Sources)
 	}
 	assert.NotEmpty(t, output.Contracts, "Should have compiled contracts")
+}
+
+func TestOpenZeppelin(t *testing.T) {
+	type testCase struct {
+		name    string
+		code    string
+		wantErr bool
+	}
+
+	tests := []testCase{
+		{
+			name: "ERC20",
+			code: `
+			// SPDX-License-Identifier: MIT
+			// Compatible with OpenZeppelin Contracts ^5.4.0
+			pragma solidity ^0.8.21;
+
+			import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+			import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+
+			contract MyToken is ERC20, ERC20Permit {
+				constructor() ERC20("MyToken", "MTK") ERC20Permit("MyToken") {}
+			}
+			`,
+			wantErr: false,
+		},
+		{
+			name: "ERC721",
+			code: `
+			// SPDX-License-Identifier: MIT
+			// Compatible with OpenZeppelin Contracts ^5.4.0
+			pragma solidity ^0.8.27;
+
+			import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+
+			contract MyToken is ERC721 {
+				constructor() ERC721("MyToken", "MTK") {}
+			}
+			`,
+			wantErr: false,
+		},
+		{
+			name: "ERC1155",
+			code: `
+			// SPDX-License-Identifier: MIT
+			// Compatible with OpenZeppelin Contracts ^5.4.0
+			pragma solidity ^0.8.27;
+
+			import {ERC1155} from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
+			import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+
+			contract MyToken is ERC1155, Ownable {
+				constructor(address initialOwner) ERC1155("") Ownable(initialOwner) {}
+
+				function setURI(string memory newuri) public onlyOwner {
+					_setURI(newuri);
+				}
+			}
+			`,
+			wantErr: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			compiler, err := NewWithVersion("0.8.27")
+			require.NoError(t, err)
+			defer compiler.Close()
+
+			input := &Input{
+				Language: "Solidity",
+				Sources: map[string]SourceIn{
+					"MyToken.sol": {Content: test.code},
+				},
+				Settings: Settings{
+					OutputSelection: map[string]map[string][]string{
+						"*": {
+							"*": []string{"abi", "evm.bytecode"},
+						},
+					},
+				},
+			}
+
+			options := &CompileOptions{
+				ImportCallback: func(url string) ImportResult {
+					fmt.Println("Importing", url)
+					var filePath string
+
+					// Handle OpenZeppelin imports
+					if contractPath, ok := strings.CutPrefix(url, "@openzeppelin/"); ok {
+						filePath = filepath.Join("openzeppelin-contracts", contractPath)
+					}
+
+					content, err := os.ReadFile(filePath)
+					if err != nil {
+						return ImportResult{Error: fmt.Sprintf("File not found: %s (tried path: %s)", url, filePath)}
+					}
+
+					return ImportResult{Contents: string(content)}
+				},
+			}
+
+			output, err := compiler.CompileWithOptions(input, options)
+			require.NoError(t, err)
+			require.NotNil(t, output)
+
+			if test.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.NotEmpty(t, output.Contracts, "Should have compiled contracts")
+				assert.Empty(t, output.Errors, "Should have no errors")
+			}
+		})
+	}
+
 }
